@@ -1,0 +1,107 @@
+/*
+  elm-hot creates an additional div wrapper around the app to make HMR possible.
+  This could break styling in development mode if you are using Elm UI.
+
+  More context in the issue:
+    https://github.com/halfzebra/create-elm-app/issues/320
+*/
+[data-elm-hot="true"] {
+  height: inherit;
+}
+
+body {
+  font-family: 'Source Sans Pro', 'Trebuchet MS', 'Lucida Grande', 'Bitstream Vera Sans', 'Helvetica Neue', sans-serif;
+  margin: 0;
+  text-align: center;
+  color: #293c4b;
+}
+
+h1 {
+  font-size: 30px;
+}
+
+img {
+  margin: 20px 0;
+  max-width: 200px;
+}
+
+.keyLetter {
+	font-size: 200%;
+	height: auto;
+	width: auto;
+	border: 1px solid black;
+	border-radius: 20px;
+	margin: auto;
+	padding: 30px;
+}
+
+#keyButton {
+	height: auto;
+	width: auto;
+	margin: 40px auto;
+}
+
+ul {
+	list-style-type: none;
+}
+
+.listLetterBox {
+	height: 60px;
+	width: auto;
+	border: 1px solid black;
+	border-radius: 20px;
+	margin: auto;
+	padding: 30px;
+	margin: 0 10px;
+}
+
+ul > .grid-container.grid-container--fit {
+    display: inline-block;
+    /* You can also add some margins here to make it look prettier */
+}
+
+.grid-item > .listLetter {
+    display: inline-block;
+    /* You can also add some margins here to make it look prettier */
+}
+
+.listLetter {
+	font-size: 200%;
+	width: auto;
+}
+
+.ulDiv {
+	display: inline-block;
+	width: 100%;
+}
+
+#listContainer {
+	display: flex;
+	width: 100%;
+	padding: 0;
+	margin: 0;
+}
+.wrapper {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  grid-auto-flow: dense;
+}
+
+.grid-container {
+  display: grid;
+  grid-template-rows: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  grid-auto-flow: dense;
+}
+.grid-container--fit {
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  width: auto;
+}
+.listWord {
+	margin: 0;
+	width: 100%;
+	display: inline-block;
+}
+
+
