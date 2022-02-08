@@ -1,6 +1,7 @@
 port module Main exposing (..)
 
 import Browser
+import Browser.Events
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
@@ -11,6 +12,9 @@ import Set exposing (Set)
 import Random.List
 import Random
 import Flip exposing (flip)
+import Bootstrap.Grid as Grid
+import Bootstrap.Grid.Row as Row
+import Bootstrap.Grid.Col as Col
 import Array
 import List.Extra exposing (splitAt, cycle, getAt, groupsOfVarying)
 --import Counter exposing (..)
@@ -28,6 +32,21 @@ type Model
     | Running GameState
     | GameOver GameState
     | Error
+
+type Key
+  = Character Char
+  | Control String
+
+type KeyEventMsg
+    = KeyEventControl
+    | KeyEventLetter Char
+    {--
+    | KeyEventUnknown String
+    | KeyEventAlt
+    | KeyEventShift
+    | KeyEventMeta
+    -}
+
 
 type alias Flags =
     { 
@@ -50,21 +69,30 @@ type alias GameState =
     , wordList : List String
     , numberOfWords : Int
     , spaceIndexes : List Int
+    , keyPressed : String
     , letterIndexes : List Int
     , firstSpace : Int
     , secondSpace : Int
     , thirdSpace : Int
     , fourthSpace : Int
     , fifthSpace : Int
-    , guesses : Set String
+    , indexedWordOne : List (Int, String)
+    , indexedWordTwo : List (Int, String)
+    , indexedWordThree : List (Int, String)
+    , indexedWordFour : List (Int, String)
+    , indexedWordFive : List (Int, String)
+    , displayMsg : String
     , revealed : Int
     , words : List String
     , currentLevel : Int
-    , wrongGuesses : List String
+    , currentLetterIndex : Int
+    , currentLetterString : String
+    , wrongGuesses : Int
+    , nextButton : Bool
+    , gameOver : Bool
+    , errorMsg : String
     , scrambledWords : List String
     , scrambledPhrase : String -- "I lvoe etanig cohlotae"
-    , stillUnderscores : Bool
-    , gameOver : Bool
     }
 
 
@@ -79,13 +107,13 @@ init flags =
 
 
 type Msg
-    = Guess String
-    | Restart
+    = Restart
     | NewPhrase (Result Http.Error String)
     --| EndOfGame Bool --Bool being True if won, False if lost
     | SendData String
     | Received (Result Decode.Error String) 
-    --| AssignSpaces (List Int)
+    | NextRound Int
+    | KeyPressed Key
     | NoOp
 
 
@@ -94,23 +122,59 @@ update msg model =
     case msg of
         NoOp -> ( model, Cmd.none )
 
-        Guess char ->
+        NextRound int ->
             case model of
                 Running gameState ->
-                    (  Running { gameState | guesses = Set.insert char gameState.guesses 
-                               , wrongGuesses = List.filter (\char_ -> not <| String.contains char_ gameState.phrase) <| Set.toList <| Set.insert char gameState.guesses 
-                               , stillUnderscores = seeIfBlanks <| List.map
-                                                                                    (\char2 ->
-                                                                                        if char2 == " " then
-                                                                                            " "
+                    case int of
+                        -- Figure out which number to match
+                        -- No effect of this pattern match.  It never gets to 11 because the fetchSentence fires before and we cannot fetch an /11 url
+                        11 ->
+                            ( Running { gameState | gameOver = True }, Cmd.none )
 
-                                                                                        else if Set.member char2 gameState.guesses then
-                                                                                            char2
+                        _ ->
+                            ( Running { gameState | currentLevel = int }, fetchSentence int )
+                _ ->
+                    ( model, Cmd.none )
 
-                                                                                        else
-                                                                                            "_"
-                                                                                    ) <| String.split "" <| gameState.phrase
-                               }, sendStuff <| Json.Encode.int <| Set.size gameState.guesses )
+--Case Sensative as of now
+        KeyPressed key ->
+            case model of
+                GameOver gameState ->
+                    case key of
+                        Control "Enter" ->
+                            ( Running { gameState | currentLevel = 1 }, fetchSentence 1 )
+                        _ ->
+                            ( GameOver { gameState | errorMsg = "Please press Enter to continue." }, Cmd.none )
+
+                Running gameState ->
+                    if gameState.revealed == List.length gameState.indexedMap then
+                        case key of
+                            Control "Enter" ->
+                                case gameState.currentLevel of
+                                    10 ->
+                                        ( GameOver { gameState | displayMsg = "You Win." }, Cmd.none ) 
+                                    _ ->
+                                        ( Running { gameState | currentLevel = gameState.currentLevel + 1 }, fetchSentence (gameState.currentLevel + 1) )
+                            
+                            _ ->
+                                ( Running { gameState | errorMsg = "Please press Enter to continue." }, Cmd.none )
+                    else
+                        case key of
+                            Character char ->
+                                if String.fromChar char == gameState.currentLetterString then
+                                    ( Running { gameState | keyPressed = String.fromChar char
+                                            , currentLetterIndex = gameState.currentLetterIndex + 1
+                                            , revealed = gameState.revealed + 1
+                                            , nextButton = ( gameState.revealed == (List.length gameState.indexedMap - 1) )
+                                            , currentLetterString = extractString <| Maybe.withDefault (99, "Defaults") <| List.Extra.getAt (gameState.revealed + 1) <| gameState.indexedMap
+                                            }, Cmd.none )
+                                else
+                                    ( Running { gameState | keyPressed = String.fromChar char
+                                            , wrongGuesses = gameState.wrongGuesses + 1
+                                            }, Cmd.none )
+
+                            _ ->
+                                ( model, Cmd.none )
 
                 _ ->
                     ( model, Cmd.none )
@@ -132,26 +196,63 @@ update msg model =
                                     , numberOfWords = List.length <| toWordArray phrase
                                     , spaceIndexes = getSpaceIndexes <| getSpaceElements <| toIndexedMap phrase
                                     , letterIndexes = [] --Calc
+                                    , keyPressed = "" --Representing here as a String, but comes in as Char
                                     , scrambledWords = []
                                     , firstSpace = sliceForFirst <| getSpaceIndexes <| getSpaceElements <| toIndexedMap phrase      
                                     , secondSpace = sliceForSecond <| getSpaceIndexes <| getSpaceElements <| toIndexedMap phrase
                                     , thirdSpace = sliceForThird <| getSpaceIndexes <| getSpaceElements <| toIndexedMap phrase
-                                    , fourthSpace = 0
-                                    , fifthSpace = 0
+                                    , fourthSpace = Maybe.withDefault 99 <| List.Extra.getAt 3 <| getSpaceIndexes <| getSpaceElements <| toIndexedMap phrase
+                                    , fifthSpace = Maybe.withDefault 99 <| List.Extra.getAt 4 <| getSpaceIndexes <| getSpaceElements <| toIndexedMap phrase
+                                    , indexedWordOne = []
+                                    , indexedWordTwo = []
+                                    , indexedWordThree = []
+                                    , indexedWordFour = []
+                                    , indexedWordFive = []
                                     , currentLevel = 1
+                                    , currentLetterIndex = 0
+                                    , currentLetterString = extractString <| Maybe.withDefault (99, "Defaults") <| List.head <| toIndexedMap phrase
+                                    --Itll be the same ^^^ but just sub List.head func with the getAt func 
                                     , scrambledPhrase = ""
-                                    , guesses = Set.empty
-                                    , revealed = 5
+                                    , errorMsg = ""
+                                    , displayMsg = ""
+                                    , revealed = 0
                                     , gameOver = False
-                                    , wrongGuesses = [] 
-                                    , stillUnderscores = True
+                                    , nextButton = False
+                                    , wrongGuesses = 0
                                     }, sendStuff <| Json.Encode.string phrase )
                         
                         Running gameState ->
-                            ( Running { gameState | phrase = phrase
+                            ( Running { phrase = phrase
                                     , words = String.split " " phrase
+                                    , indexedMap = toIndexedMap phrase
+                                    , indexedWordMap = []
+                                    , wordList = toWordArray phrase
+                                    , numberOfWords = List.length <| toWordArray phrase
+                                    , spaceIndexes = getSpaceIndexes <| getSpaceElements <| toIndexedMap phrase
+                                    , letterIndexes = [] --Calc
+                                    , keyPressed = "" --Representing here as a String, but comes in as Char
                                     , scrambledWords = []
-                                    , currentLevel = gameState.currentLevel + 1
+                                    , firstSpace = sliceForFirst <| getSpaceIndexes <| getSpaceElements <| toIndexedMap phrase      
+                                    , secondSpace = sliceForSecond <| getSpaceIndexes <| getSpaceElements <| toIndexedMap phrase
+                                    , thirdSpace = sliceForThird <| getSpaceIndexes <| getSpaceElements <| toIndexedMap phrase
+                                    , fourthSpace = Maybe.withDefault 99 <| List.Extra.getAt 3 <| getSpaceIndexes <| getSpaceElements <| toIndexedMap phrase
+                                    , fifthSpace = Maybe.withDefault 99 <| List.Extra.getAt 4 <| getSpaceIndexes <| getSpaceElements <| toIndexedMap phrase
+                                    , indexedWordOne = []
+                                    , indexedWordTwo = []
+                                    , indexedWordThree = []
+                                    , indexedWordFour = []
+                                    , indexedWordFive = []
+                                    , currentLevel = gameState.currentLevel
+                                    , currentLetterIndex = 0
+                                    , currentLetterString = extractString <| Maybe.withDefault (99, "Defaults") <| List.head <| toIndexedMap phrase
+                                    --Itll be the same ^^^ but just sub List.head func with the getAt func 
+                                    , scrambledPhrase = ""
+                                    , revealed = 0
+                                    , errorMsg = ""
+                                    , displayMsg = ""
+                                    , gameOver = False
+                                    , nextButton = False
+                                    , wrongGuesses = 0
                                     }, sendStuff <| Json.Encode.string phrase )
                         
                         _ ->
@@ -170,16 +271,7 @@ update msg model =
 
         SendData string ->
             ( model, sendStuff <| Json.Encode.string string )
-{--
-        AssignSpaces list ->
-            case model of
-                Running gameState ->
-                    case list.length of
-                        2 ->
-                            ( Running { gameState | firstSpace = list.head, secondSpace = list.tail }, Cmd.none )
-                        3 ->
-                            ( Running { gameState | firstSpace = list.head, secondSpace = List.Extra.getAt 1 list, thirdSpace = list.tail }, Cmd.none )
--}
+
         Received result ->
             case result of
                 Ok value ->
@@ -193,21 +285,14 @@ update msg model =
                             ( Loading { gameOptions | scrambledPhrase = value }, Cmd.none )
 
                         Running gameState ->
-                            --( Running { gameState | scrambledWords = value :: gameState.scrambledWords }, Cmd.none )
-                            case gameState.numberOfWords of
-                             {-- 3 ->
-                                    ( Running { gameState | scrambledPhrase = value.joinedWord }, Cmd.none )
-                                4 ->
-                                    ( Running { gameState | scrambledPhrase = value.joinedWord }, Cmd.none )
-                                5 ->
-                                    ( Running { gameState | scrambledPhrase = value.joinedWord }, Cmd.none )  -}  
-                                _ ->
-                                    ( Running { gameState | scrambledPhrase = value
-                                              , indexedWordMap = getListOfWordGroups gameState --Need the spaces as ints first...not registering them yet  works with #s
-                                              }, Cmd.none )                             
-                            
-                            --( Running { gameState | scrambledPhrase = value.joinedWord }, Cmd.none )
-                
+                                ( Running { gameState | scrambledPhrase = value
+                                          , indexedWordMap = getListOfWordGroups gameState --Need the spaces as ints first...not registering them yet  works with #s
+                                          , indexedWordOne = Maybe.withDefault [] <| List.Extra.getAt 0 <| getListOfWordGroups gameState
+                                          , indexedWordTwo = Maybe.withDefault [] <| List.Extra.getAt 1 <| getListOfWordGroups gameState
+                                          , indexedWordThree = Maybe.withDefault [] <| List.Extra.getAt 2 <| getListOfWordGroups gameState
+                                          , indexedWordFour = Maybe.withDefault [] <| List.Extra.getAt 3 <| getListOfWordGroups gameState
+                                          , indexedWordFive = Maybe.withDefault [] <| List.Extra.getAt 4 <| getListOfWordGroups gameState
+                                          }, Cmd.none )                                         
                         _ ->
                             ( model, Cmd.none )
         
@@ -215,13 +300,6 @@ update msg model =
                 Err error ->
                     ( Error, Cmd.none )
                     --( { model | error = Decode.errorToString error }, Cmd.none )
-{-
-List.Extra.takeWhile (indexLessThanSpace spaceIndex) mapped
-
-List.Extra.takeWhile (indexInRange gameState) indexMap
-
-List.Extra.dropWhile (indexLessThanSpace spaceIndex) mapped
--}
 
 sliceForFirst : List Int -> Int
 sliceForFirst list =
@@ -251,6 +329,20 @@ sliceForFourth list =
     |> Array.toList
     |> listToInt
 
+sliceForFifth : List Int -> Int
+sliceForFifth list =
+    Array.fromList list
+    |> Array.slice 4 5
+    |> Array.toList
+    |> listToInt
+{-
+checkIfComplete : GameState -> Msg
+checkIfComplete gameState =
+    if gameState.revealed + 1 == (List.length gameState.indexedMap) then
+        NextRound (gameState.currentLevel + 1)
+    else
+        Cmd.none
+-}
 listToInt : List Int -> Int
 listToInt list =
     case list of
@@ -265,6 +357,32 @@ indexLessThanSpace space mappedLetter =
         True
     else
         False
+{--
+getCurrentLetter : Int -> List (Int, String) -> String
+getCurrentLetter int indexedMap =
+-}
+getMaybeCurrentLetter : Int -> List (Int, String) -> (Int, String)
+getMaybeCurrentLetter int indexedMap =
+    Maybe.withDefault (99, "Defaults") (List.Extra.getAt int indexedMap)
+
+extractString : (Int, String) -> String
+extractString tuple =
+    Tuple.second tuple
+
+{--Unwrapping a Maybe
+commandIf : Maybe (Int, String) -> String
+commandIf (int, string) =
+  case (int, string) of
+    (Just int_, Just string_) ->
+        string
+
+    _ ->
+        "blouse"
+
+createGuessTuple : Int -> String -> (Int, String)
+createGuessTuple int string =
+    (int, string)
+--}
 
 --Feed it a tuple of ints (starting index, ending index)
 indexInRange : (Int, Int) -> (Int, String) -> Bool
@@ -330,6 +448,10 @@ getSpaceElements list =
 getListOfWordGroups : GameState -> List (List (Int, String))
 getListOfWordGroups gameState =
     case gameState.numberOfWords of
+        2 -> 
+            groupsOfVarying [ (gameState.firstSpace + 1)
+                            , (List.length gameState.indexedMap - gameState.firstSpace) 
+                            ] gameState.indexedMap
         3 -> 
             groupsOfVarying [ (gameState.firstSpace + 1)
                             , (gameState.secondSpace - gameState.firstSpace)
@@ -417,9 +539,18 @@ valueStrDecoder =
     Decode.field "value" Decode.string
 --Gotta decode for each word - shit
 
-iSubMapDecoder : Decoder (List IndexedLetter)
-iSubMapDecoder =
-  Decode.list indexedListDecoder
+keyDecoder : Decode.Decoder Msg
+keyDecoder =
+    Decode.map (toKey >> KeyPressed) (Decode.field "key" Decode.string)
+
+toKey : String -> Key
+toKey string =
+    case String.uncons string of
+        Just ( char, "" ) ->
+            Character char
+
+        _ ->
+            Control string
 
 indexedListDecoder : Decoder IndexedLetter
 indexedListDecoder =
@@ -435,7 +566,9 @@ boolDecoder =
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    receiveScrambled (Decode.decodeValue valueStrDecoder >> Received)
+    Sub.batch [ receiveScrambled (Decode.decodeValue valueStrDecoder >> Received)
+              , Browser.Events.onKeyDown keyDecoder
+              ]
 
 ---- VIEW ----
 
@@ -447,15 +580,13 @@ view model =
             div [] [ Html.text "Loading" ]
 
         Running gameState ->
-            case List.length gameState.wrongGuesses of
-                7 ->
+            case gameState.wrongGuesses of
+            {-
+                20 ->
                     viewGameOver gameState
+            -}
                 _ ->
-                    case gameState.stillUnderscores of
-                        True ->
-                            viewGameState gameState
-                        False ->
-                            viewGameOver gameState
+                    viewGameState gameState
 
 
         GameOver gameState ->
@@ -485,14 +616,13 @@ toWordArray : String -> List String
 toWordArray string =
     String.split " " string
 
-winWhenZeroHtml : Bool -> Html Msg
-winWhenZeroHtml bool =
+displayIfTrue : Bool -> Html Msg
+displayIfTrue bool =
         case bool of
             False ->
-                div [ Html.Attributes.class "gameover" ] [ Html.text "Congrats! You have stumped the monster! Guess any letter once more to see him destroyed."]
+                div [] []
             True ->
-                div [ Html.Attributes.class "gameover" ] [] 
-
+                button [ Html.Attributes.id "nextButton" ] [ Html.text "Next" ]
 
 viewInt : Int -> Html Msg
 viewInt count =
@@ -507,10 +637,30 @@ checkIfRevealed tuple revealed =
     else
         " "
 
+checkIfRevealedHtml : (Int, String) -> Int -> Html msg
+checkIfRevealedHtml tuple revealed =
+    if revealed > Tuple.first tuple then
+        li [ Html.Attributes.class "ltrRevealed" ] [ Html.text (Tuple.second tuple) ]
+    else
+        li [ Html.Attributes.class "ltrHidden" ] [ Html.text " " ]
+
+checkIfRevealedHtmlBS : (Int, String) -> Int -> Grid.Column msg
+checkIfRevealedHtmlBS tuple revealed =
+    if revealed > Tuple.first tuple then
+        Grid.col [ Col.attrs [ class "ltrRevealed" ] ] [ Html.text (Tuple.second tuple) ]
+    else
+        case tuple of
+        (_, " ") ->
+            Grid.col [ Col.attrs [ class "spaceHidden" ] ] [ Html.text " " ]
+        _ ->
+            Grid.col [ Col.attrs [ class "ltrHidden" ] ] [ Html.text " " ]
+
+        
+
 viewLetter : Int -> (Int, String) -> Html msg
 viewLetter revealed indexedLetter =
     div [ Html.Attributes.class "grid-item" ] 
-    [ li [ Html.Attributes.class "listLetter" ] [ Html.text (checkIfRevealed indexedLetter revealed ) ] ]
+    [ checkIfRevealedHtml indexedLetter revealed ]
 {--
 viewRow : List (Int, String) -> Html msg
 viewRow indexedLetter =
@@ -519,6 +669,35 @@ viewRow indexedLetter =
 -}
     --div [] [ checkIfRevealed indexedLetter ]
     --Show either nothing or the letter
+
+viewSimplerKeyboard : GameState -> Html msg
+viewSimplerKeyboard gameState =
+    Grid.container [] [ Grid.row [] (viewIndexedWordOne gameState)
+           , Grid.row [] (viewIndexedWordTwo gameState)
+           , Grid.row [] (viewIndexedWordThree gameState)
+           , Grid.row [] (viewIndexedWordFour gameState)
+           , Grid.row [] (viewIndexedWordFive gameState) 
+    ]
+
+viewIndexedWordOne : GameState -> List (Grid.Column msg)
+viewIndexedWordOne gameState =
+    List.map (flip checkIfRevealedHtmlBS gameState.revealed) gameState.indexedWordOne 
+
+viewIndexedWordTwo : GameState -> List (Grid.Column msg)
+viewIndexedWordTwo gameState =
+    List.map (flip checkIfRevealedHtmlBS gameState.revealed) gameState.indexedWordTwo 
+
+viewIndexedWordThree : GameState -> List (Grid.Column msg)
+viewIndexedWordThree gameState =
+    List.map (flip checkIfRevealedHtmlBS gameState.revealed) gameState.indexedWordThree
+
+viewIndexedWordFour : GameState -> List (Grid.Column msg)
+viewIndexedWordFour gameState =
+    List.map (flip checkIfRevealedHtmlBS gameState.revealed) gameState.indexedWordFour
+
+viewIndexedWordFive : GameState -> List (Grid.Column msg)
+viewIndexedWordFive gameState =
+    List.map (flip checkIfRevealedHtmlBS gameState.revealed) gameState.indexedWordFive
 
 viewKeyboard : Int -> List (List (Int, String)) -> List( List (Html msg))
 viewKeyboard int indexedWordMap =
@@ -535,37 +714,31 @@ extractHtmlList htmlList =
 getInnerList : List(Html msg) -> Html msg
 getInnerList outerList =
     outerList
-    |> createInnerList
-    |> Html.ul [] 
-
+    --|> createInnerList
+    |> Html.ul [ Html.Attributes.class "container" ]
+{-
 createInnerList : List(Html msg) -> List(Html msg)
 createInnerList outerList =
     List.map addBrTo outerList
-
+-}
+{- This is adding them to each letter
 addBrTo : Html msg -> Html msg
 addBrTo html =
-    div [ Html.Attributes.class "grid-container grid-container--fit listLetterBox" ] [ html
+    div [ Html.Attributes.class "row" ] [ html
            , br [] []
            ]
+-}
 
 viewGameOver : GameState -> Html Msg
 viewGameOver gameState =
-    case gameState.stillUnderscores of
-        True ->
-            div [] [ 
-                div [] [ h1 [] [ Html.text "Game Over. You have failed your fellow man. The Monster will keep growing." ]
-                       , br [] []
-                       , img [src "./fpm.png", Html.Attributes.class "losingEnd" ] [] 
-                       , br [] []
-                       , button [ onClick Restart ] [ Html.text "Play Again" ] ]
-                       ]
-        False ->
-            div [] [ 
-                div [] [ h1 [] [ Html.text "You did it! You have saved the world from this awful Monster! Be gone with him!" ]
-                       , img [ src "./fpm.png", Html.Attributes.class "winningEnd" ] []
-                       , br [] [] 
-                       , button [ onClick Restart ] [ Html.text "Play Again" ] ]
-                       ]
+        div [] [ 
+            div [] [ h1 [] [ Html.text gameState.displayMsg ]
+                   , br [] []
+                   , br [] []
+                   , button [ onClick Restart ] [ Html.text "Play Again" ]
+                   , br [] []
+                   , div [ Html.Attributes.id "errorMsg" ] [ Html.text gameState.errorMsg ] ]
+                   ]
                        
 viewGameState : GameState -> Html Msg
 viewGameState gameState =
@@ -583,37 +756,18 @@ viewGameState gameState =
             |> String.split ""
             |> Set.fromList
 
-        failuresHtml =
-            gameState.guesses
-            |> Set.toList
-            |> List.filter (\char -> not <| Set.member char phraseSet)
-            |> List.map (\char -> span [] [ Html.text char ])
-            |> div [ Html.Attributes.class "failures" ]
+        scoreHtml =
+            div [ Html.Attributes.id "scoreHtml" ] 
+                [ span [] [ Html.text "Score:  " ]
+                , span [] [ Html.text (String.fromInt (gameState.currentLevel - 1)) ] 
+                ]
 
-        hangmanHtml =
-            gameState.guesses
-            |> Set.toList
-            |> List.filter (\char -> not <| Set.member char phraseSet)
-            |> List.length
-            |> viewInt
-
-        gameOverHtml =
-            gameState.phrase
-                |> String.split ""
-                |> List.map
-                    (\char ->
-                        if char == " " then
-                            " "
-
-                        else if Set.member char gameState.guesses then
-                            char
-
-                        else
-                            "_"
-                    )
-            |> seeIfBlanks
-            |> winWhenZeroHtml
-
+        wrongGuessesHtml =
+            div [ Html.Attributes.id "wrongGuesses" ] 
+                [ span [] [ Html.text "Number of Misses:  " ]
+                , span [] [ Html.text (String.fromInt gameState.wrongGuesses) ] 
+                ]
+{-
         keyboardHtml =
             gameState.wordList
             |> List.map (\word ->
@@ -622,11 +776,15 @@ viewGameState gameState =
                 )
             |> div [ Html.Attributes.id "wholeKeyboard" ]
 
-        pleaseHtml =
+        keyboardHtml =
             gameState.indexedWordMap
             |> viewKeyboard gameState.revealed
             |> extractHtmlList
             |> getInnerList
+-}
+        keyboardHtml =
+            gameState
+            |> viewSimplerKeyboard
 
         wordHtml =
             gameState.indexedMap
@@ -636,23 +794,28 @@ viewGameState gameState =
                 )
             |> div [ Html.Attributes.class "letterBtns" ]
 
+        nextButtonHtml =
+            gameState.nextButton
+            |> displayIfTrue
+
     in
     div []
         [ h1 [] [ Html.text "Guess The Phrase" ]
-        , h3 [ Html.Attributes.class "" ] [ Html.text "Cant you correctly unscramble the phrase?" ]
+        , h3 [ Html.Attributes.class "" ] [ Html.text "Can you correctly unscramble the phrase? Beware the CAPITAL LETTERS." ]
+        , h4 [] [Html.text "Orange keys are spaces."]
+        , br [] []
         , h1 [ Html.Attributes.class "scrambledPhrase" ] [ Html.text gameState.scrambledPhrase ]
         , br [] []
+        , br [] []
+        , br [] []
+        , scoreHtml
+        , br [] []
+        , wrongGuessesHtml
+        , br [] []
         , h4 [] [ Html.text "Keyboard" ]
-        --, phraseHtml
-        , br [] []
-        , br [] []
-        --, wordHtml
-
-        , pleaseHtml
-        , gameOverHtml
-        , div [ Html.Attributes.id "resignArea" ] [ h3 [] [ Html.text "Feel Free to Start Over if You Can't Handle it"]
-                                                  , button [ onClick Restart, Html.Attributes.class "btnClass" ] [ Html.text "Resign" ]
-                                                  ]
+        , keyboardHtml
+        , nextButtonHtml
+        , div [ Html.Attributes.id "errorMsg" ] [ Html.text gameState.errorMsg ]
         ]
 
 

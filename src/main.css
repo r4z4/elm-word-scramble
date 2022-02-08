@@ -104,4 +104,53 @@ ul > .grid-container.grid-container--fit {
 	display: inline-block;
 }
 
+#scoreHtml {
+	font-weight: bold;
+	font-size: 200%;
+	margin: 20px;
+}
 
+#wrongGuesses {
+	margin: 20px;
+}
+
+#nextButton {
+	font-size: large;
+	font-weight: bold;
+	padding: 10px;
+	border: 1px solid black;
+	border-radius: 10px;
+	color: white;
+	background-color: green;
+	margin: 20px;
+}
+
+ul.row > li {
+    display: inline-block;
+}
+
+.ltrRevealed {
+	border: 1px solid black;
+	border-radius: 5px;
+	padding: 5px;
+	height: 60px;
+	font-weight: bold;
+	font-size: 200%;
+	background-color: #1CCA1E;
+	color: white;
+}
+
+.ltrHidden {
+	border: 1px solid black;
+	border-radius: 5px;
+	padding: 5px;
+	height: 60px;
+}
+
+.spaceHidden {
+	border: 1px solid black;
+	border-radius: 5px;
+	padding: 5px;
+	height: 60px;
+	background-color: #D54E0F;
+}
